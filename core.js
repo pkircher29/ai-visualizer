@@ -94,10 +94,18 @@ const AV = (() => {
   let raw = { state: "idle", level: 0, samples: null, alert: false,
               loading: false };
   if (!DEMO) {
+    let boot = null;
     setInterval(async () => {
       try {
         const r = await fetch("/state", { cache: "no-store" });
-        raw = await r.json();
+        const j = await r.json();
+        // server restarted -> reload so long-lived kiosk pages pick up
+        // redeployed faces instead of running stale code forever
+        if (j.boot) {
+          if (boot && boot !== j.boot) { location.reload(); return; }
+          boot = j.boot;
+        }
+        raw = j;
       } catch (e) { /* server gone: hold last state */ }
     }, 120);
   }

@@ -188,6 +188,10 @@ _delay_buf = deque()
 _delay_last = None
 _delay_lock = threading.Lock()
 
+# Stamped into every /state payload; core.js reloads the page when it
+# changes so kiosk displays pick up redeployed faces after a restart.
+BOOT_TS = round(time.time(), 3)
+
 
 def read_bus_synced():
     cur = read_bus()
@@ -213,7 +217,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         try:
             if path == "/state":
-                self._send(json.dumps(read_bus_synced()).encode(),
+                payload = read_bus_synced()
+                payload["boot"] = BOOT_TS
+                self._send(json.dumps(payload).encode(),
                            "application/json")
             elif path == "/config":
                 out = {"name": CFG["name"], "badge": CFG["badge"],
