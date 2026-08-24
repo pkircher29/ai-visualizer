@@ -158,8 +158,13 @@ def read_bus():
             # A fresh waveform IS speech, whatever the state file says.
             state = "speaking"
             samples = [float(s) for s in raw[:64]]
+            # Voice bridges may write either normalized [-1, 1] values or
+            # legacy int16-scale samples.  Convert both to a truthful 0..1
+            # envelope instead of making normalized speech appear nearly mute.
+            peak = max(abs(s) for s in samples)
+            scale = 1.0 if peak <= 1.5 else 3000.0
             mean = sum(abs(s) for s in samples) / len(samples)
-            level = min(1.0, mean / 3000.0)
+            level = min(1.0, mean / scale)
     except (OSError, ValueError, KeyError, TypeError):
         pass
     try:

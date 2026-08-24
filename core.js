@@ -143,7 +143,7 @@ const AV = (() => {
   }
 
   /* ----------------------- envelope + samples easing ----------------------- */
-  let peak = 0.05, sPeak = 200;
+  let peak = 0.05, sPeak = 0.02, normalizedSamples = null;
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
@@ -165,7 +165,16 @@ const AV = (() => {
     if (s && s.length) {
       let mx = 0;
       for (let i = 0; i < s.length; i++) mx = Math.max(mx, Math.abs(s[i]));
-      sPeak = Math.max(mx, 200, sPeak * 0.98);
+      // The live bridge may provide normalized [-1, 1] samples while
+      // the demo/legacy bus uses int16-scale values.  Preserve the signal's
+      // real shape in both cases rather than pinning normalized samples under
+      // the old 200-count floor (which turns a speaking mouth into dots).
+      const normalized = mx <= 1.5;
+      const floor = normalized ? 0.02 : 200;
+      if (normalizedSamples !== null && normalized !== normalizedSamples)
+        sPeak = floor;
+      normalizedSamples = normalized;
+      sPeak = Math.max(mx, floor, sPeak * 0.98);
       const n = s.length;
       for (let i = 0; i < 64; i++) {
         const v = Math.abs(s[Math.min(n - 1, Math.round(i * (n - 1) / 63))])
