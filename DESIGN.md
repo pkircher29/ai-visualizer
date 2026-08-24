@@ -56,12 +56,12 @@ Extended preview moods: curious, amused, skeptical, uncertain, concerned, encour
 
 Motion expresses state instead of decorating the screen:
 
-- Voice envelope drives the waveform and particle intensity.
-- State changes alter signal color and ring speed.
+- Voice envelope drives only the speaking waveform and speaking-particle intensity.
+- State changes alter signal color, ring speed, and non-meter expressive motion.
 - A slow workshop signal ring keeps the composition alive at idle.
 - QUESTION, SIGNAL, MEMORY, and BUILD modules travel subtly around the face.
-- Sparks are sparse at idle and increase only with real activity.
-- A restrained background ticker carries: CURIOUS / CANDID / COLLABORATIVE / USEFUL.
+- Sparks remain expressive state animation; the labeled VOICE ENVELOPE meter uses only real bus samples.
+- The early scrolling ticker was intentionally removed after visual review because it competed with the face and added clutter.
 - `F` toggles fullscreen.
 - Thinking sound remains disabled.
 
