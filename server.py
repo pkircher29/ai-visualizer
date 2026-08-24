@@ -60,6 +60,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -74,6 +75,8 @@ DEFAULTS = {
     "port": 8790,
     "bus_dir": "",          # where the .voice_* files live ("" = here)
     "thinking_sound": True, # play assets/thinking.wav while thinking
+    "av_sync_ms": 0,        # delay reported state/level by N ms so the face
+                            # lines up with high-latency outputs (Bluetooth)
 }
 
 
@@ -176,12 +179,41 @@ def read_bus():
             "alert": alert, "loading": loading}
 
 
+# A/V sync: speaking begins the moment playback starts writing to the audio
+# engine, but high-latency sinks (Bluetooth) render it hundreds of ms later.
+# Buffer /state payloads and serve the one from av_sync_ms ago so the face
+# tracks the listener's ears, not the audio engine. Alerts stay real-time.
+AV_SYNC_S = max(0.0, float(CFG.get("av_sync_ms", 0) or 0) / 1000.0)
+_delay_buf = deque()
+_delay_last = None
+_delay_lock = threading.Lock()
+
+
+def read_bus_synced():
+    cur = read_bus()
+    if AV_SYNC_S <= 0:
+        return cur
+    global _delay_last
+    now = time.time()
+    with _delay_lock:
+        _delay_buf.append((now, cur))
+        target = now - AV_SYNC_S
+        while _delay_buf and _delay_buf[0][0] <= target:
+            _delay_last = _delay_buf.popleft()[1]
+        out = dict(_delay_last) if _delay_last else {
+            "state": "idle", "level": 0.0, "samples": [0.0] * 64,
+            "alert": False, "loading": False,
+        }
+    out["alert"] = cur["alert"]
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
             if path == "/state":
-                self._send(json.dumps(read_bus()).encode(),
+                self._send(json.dumps(read_bus_synced()).encode(),
                            "application/json")
             elif path == "/config":
                 out = {"name": CFG["name"], "badge": CFG["badge"],
