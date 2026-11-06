@@ -1,8 +1,8 @@
 {
-  "name": "JARVIS",
-  "badge": "",
-  "face": "board",
+  "name": "Chuck",
+  "badge": "Paul's Collaborator",
+  "face": "chuck",
   "port": 8790,
   "bus_dir": "",
-  "thinking_sound": true
+  "thinking_sound": false
 }

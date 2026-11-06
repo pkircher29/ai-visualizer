@@ -94,10 +94,18 @@ const AV = (() => {
   let raw = { state: "idle", level: 0, samples: null, alert: false,
               loading: false };
   if (!DEMO) {
+    let boot = null;
     setInterval(async () => {
       try {
         const r = await fetch("/state", { cache: "no-store" });
-        raw = await r.json();
+        const j = await r.json();
+        // server restarted -> reload so long-lived kiosk pages pick up
+        // redeployed faces instead of running stale code forever
+        if (j.boot) {
+          if (boot && boot !== j.boot) { location.reload(); return; }
+          boot = j.boot;
+        }
+        raw = j;
       } catch (e) { /* server gone: hold last state */ }
     }, 120);
   }
@@ -143,7 +151,7 @@ const AV = (() => {
   }
 
   /* ----------------------- envelope + samples easing ----------------------- */
-  let peak = 0.05, sPeak = 200;
+  let peak = 0.05, sPeak = 0.02, normalizedSamples = null;
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
@@ -165,7 +173,16 @@ const AV = (() => {
     if (s && s.length) {
       let mx = 0;
       for (let i = 0; i < s.length; i++) mx = Math.max(mx, Math.abs(s[i]));
-      sPeak = Math.max(mx, 200, sPeak * 0.98);
+      // The live bridge may provide normalized [-1, 1] samples while
+      // the demo/legacy bus uses int16-scale values.  Preserve the signal's
+      // real shape in both cases rather than pinning normalized samples under
+      // the old 200-count floor (which turns a speaking mouth into dots).
+      const normalized = mx <= 1.5;
+      const floor = normalized ? 0.02 : 200;
+      if (normalizedSamples !== null && normalized !== normalizedSamples)
+        sPeak = floor;
+      normalizedSamples = normalized;
+      sPeak = Math.max(mx, floor, sPeak * 0.98);
       const n = s.length;
       for (let i = 0; i < 64; i++) {
         const v = Math.abs(s[Math.min(n - 1, Math.round(i * (n - 1) / 63))])

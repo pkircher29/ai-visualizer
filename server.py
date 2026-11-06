@@ -60,6 +60,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -74,6 +75,8 @@ DEFAULTS = {
     "port": 8790,
     "bus_dir": "",          # where the .voice_* files live ("" = here)
     "thinking_sound": True, # play assets/thinking.wav while thinking
+    "av_sync_ms": 0,        # delay reported state/level by N ms so the face
+                            # lines up with high-latency outputs (Bluetooth)
 }
 
 
@@ -155,11 +158,21 @@ def read_bus():
         age = time.time() - float(payload.get("ts", 0))
         raw = payload.get("samples") or []
         if raw and age < WAVEFORM_STALE_S:
-            # A fresh waveform IS speech, whatever the state file says.
-            state = "speaking"
-            samples = [float(s) for s in raw[:64]]
-            mean = sum(abs(s) for s in samples) / len(samples)
-            level = min(1.0, mean / 3000.0)
+            values = [float(s) for s in raw[:64]]
+            # Voice bridges may write either normalized [-1, 1] values or
+            # legacy int16-scale samples.  Convert both to a truthful 0..1
+            # envelope instead of making normalized speech appear nearly mute.
+            peak = max(abs(s) for s in values)
+            scale = 1.0 if peak <= 1.5 else 3000.0
+            silence_floor = 0.004 if peak <= 1.5 else 40.0
+            if peak > silence_floor:
+                # A fresh, AUDIBLE waveform is speech, whatever the state
+                # file says.  A fresh all-zero frame is just a loopback
+                # capture of silence and must not force a speaking face.
+                state = "speaking"
+                samples = values
+                mean = sum(abs(s) for s in samples) / len(samples)
+                level = min(1.0, mean / scale)
     except (OSError, ValueError, KeyError, TypeError):
         pass
     try:
@@ -171,12 +184,47 @@ def read_bus():
             "alert": alert, "loading": loading}
 
 
+# A/V sync: speaking begins the moment playback starts writing to the audio
+# engine, but high-latency sinks (Bluetooth) render it hundreds of ms later.
+# Buffer /state payloads and serve the one from av_sync_ms ago so the face
+# tracks the listener's ears, not the audio engine. Alerts stay real-time.
+AV_SYNC_S = max(0.0, float(CFG.get("av_sync_ms", 0) or 0) / 1000.0)
+_delay_buf = deque()
+_delay_last = None
+_delay_lock = threading.Lock()
+
+# Stamped into every /state payload; core.js reloads the page when it
+# changes so kiosk displays pick up redeployed faces after a restart.
+BOOT_TS = round(time.time(), 3)
+
+
+def read_bus_synced():
+    cur = read_bus()
+    if AV_SYNC_S <= 0:
+        return cur
+    global _delay_last
+    now = time.time()
+    with _delay_lock:
+        _delay_buf.append((now, cur))
+        target = now - AV_SYNC_S
+        while _delay_buf and _delay_buf[0][0] <= target:
+            _delay_last = _delay_buf.popleft()[1]
+        out = dict(_delay_last) if _delay_last else {
+            "state": "idle", "level": 0.0, "samples": [0.0] * 64,
+            "alert": False, "loading": False,
+        }
+    out["alert"] = cur["alert"]
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
             if path == "/state":
-                self._send(json.dumps(read_bus()).encode(),
+                payload = read_bus_synced()
+                payload["boot"] = BOOT_TS
+                self._send(json.dumps(payload).encode(),
                            "application/json")
             elif path == "/config":
                 out = {"name": CFG["name"], "badge": CFG["badge"],
